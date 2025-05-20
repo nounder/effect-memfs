@@ -13,16 +13,13 @@ import * as OS from "node:os"
 import * as Path from "node:path"
 import { handleErrnoException } from "./error.ts"
 
-const handleBadArgument = (method: string) => (err: unknown) =>
-  Error.BadArgument({
-    module: "FileSystem",
-    method,
-    message: (err as Error).message ?? String(err),
-  })
+export type Contents = memfs.NestedDirectoryJSON
 
-export function make(files?: memfs.NestedDirectoryJSON) {
+export function make(contents?: Contents) {
   const NFS = memfs.createFsFromVolume(
-    memfs.Volume.fromNestedJSON(files ?? {}),
+    contents
+      ? memfs.Volume.fromNestedJSON(contents)
+      : new memfs.Volume(),
   )
 
   const access = (() => {
@@ -699,3 +696,10 @@ export function make(files?: memfs.NestedDirectoryJSON) {
       }),
   )
 }
+
+const handleBadArgument = (method: string) => (err: unknown) =>
+  Error.BadArgument({
+    module: "FileSystem",
+    method,
+    message: (err as Error).message ?? String(err),
+  })
