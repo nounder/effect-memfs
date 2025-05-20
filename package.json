@@ -1,0 +1,16 @@
+{
+  "name": "effect-memfs",
+  "module": "src/index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "@effect/platform": "^0.82.4",
+    "effect": "^3.15.2",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "memfs": "^4.17.2"
+  }
+}
