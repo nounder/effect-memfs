@@ -1,6 +1,7 @@
 import { effectify } from "@effect/platform/Effectify"
 import * as Error from "@effect/platform/Error"
 import * as FileSystem from "@effect/platform/FileSystem"
+import { Layer } from "effect"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { pipe } from "effect/Function"
@@ -13,12 +14,19 @@ import * as OS from "node:os"
 import * as Path from "node:path"
 import { handleErrnoException } from "./error.ts"
 
-export type Contents = memfs.NestedDirectoryJSON
+export type Contents = memfs.DirectoryJSON
+
+const handleBadArgument = (method: string) => (err: unknown) =>
+  Error.BadArgument({
+    module: "FileSystem",
+    method,
+    message: (err as Error).message ?? String(err),
+  })
 
 export function make(contents?: Contents) {
   const NFS = memfs.createFsFromVolume(
     contents
-      ? memfs.Volume.fromNestedJSON(contents)
+      ? memfs.Volume.fromJSON(contents)
       : new memfs.Volume(),
   )
 
@@ -697,9 +705,13 @@ export function make(contents?: Contents) {
   )
 }
 
-const handleBadArgument = (method: string) => (err: unknown) =>
-  Error.BadArgument({
-    module: "FileSystem",
-    method,
-    message: (err as Error).message ?? String(err),
-  })
+export const layer = Layer.effect(
+  FileSystem.FileSystem,
+  make(),
+)
+
+export const layerWith = (contents: Contents) =>
+  Layer.effect(
+    FileSystem.FileSystem,
+    make(contents),
+  )
