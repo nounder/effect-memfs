@@ -1,5 +1,10 @@
 {
   "compilerOptions": {
+    "paths": {
+      // for local examples
+      "effect-memfs": ["./src/index.ts"]
+    },
+
     // Environment setup & latest features
     "lib": ["ESNext"],
     "target": "ESNext",

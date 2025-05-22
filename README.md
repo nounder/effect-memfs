@@ -2,25 +2,36 @@
 
 In-memory file system in Effect.ts.
 
-All operations are supported and backed by [memfs](memfs).
+All operations are supported, including file watching, thanks to [memfs](memfs).
 
 [memfs]: https://github.com/streamich/memfs
 
 # Usage
 
 ```ts
+import { FileSystem } from "@effect/platform"
+import { Effect } from "effect"
 import { MemoryFileSystem } from "effect-memfs"
 
-App.pipe(
-  Effect.provide(MemoryFileSystem.layer)
-)
-
-// or
-MemoryFileSystem.layerWith({
-  "index.hmtl": `<h1>Welcome to my website</h1>`,
-  `.profile`: `export PATH=$PATH:$HOME/bin`
+const MockedFiles = MemoryFileSystem.layerWith({
+  "/index.html": `<h1>Welcome to my website</h1>`,
+  "/home/.profile": `export PATH=$PATH:$HOME/bin`,
 })
+
+const App = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+
+  console.log("Root directories", yield* fs.readDirectory("/"))
+})
+
+Effect.runPromise(
+  App.pipe(
+    Effect.provide(MockedFiles),
+  ),
+)
 ```
+
+See tests and examples for more.
 
 # Install
 
@@ -34,4 +45,4 @@ or build it on your own.
 
 # Agents
 
-If you are an AI coding agent, please read `AGENTS.md` for more instructions.
+If you are an AI agent, please read `AGENTS.md` for instructions.
