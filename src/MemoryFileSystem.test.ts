@@ -100,20 +100,19 @@ describe("file operations", () => {
       expect(fileInfo.mode & 0o777).toEqual(newMode)
     }))
 
-  it.skip("accessing nonexistent file throws NotFound error", () =>
+  it("accessing nonexistent file throws NotFound error", () =>
     effect(function*() {
       const fs = yield* FS
 
-      let error = null
-      try {
-        yield* fs.readFile("/nonexistent.txt")
-      } catch (e) {
-        error = e
-      }
+      const result = yield* Effect.either(fs.readFile("/nonexistent.txt"))
 
-      expect(error).toBeDefined()
-      expect(error._tag).toBe("SystemError")
-      expect(error.reason).toBe("NotFound")
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("SystemError")
+        if (result.left._tag === "SystemError") {
+          expect(result.left.reason).toBe("NotFound")
+        }
+      }
     }))
 })
 
@@ -176,7 +175,7 @@ it("creating nested directories", () =>
     expect(parentInfo.type).toBe("Directory")
   }))
 
-it.skip("renaming files", () =>
+it("renaming files", () =>
   effect(function*() {
     const fs = yield* FS
 
@@ -191,22 +190,22 @@ it.skip("renaming files", () =>
 
     yield* fs.rename("/original-file.txt", "/renamed-file.txt")
 
-    let error = null
-    try {
-      const res = yield* fs.stat("/original-file.txt")
-    } catch (e) {
-      error = e
-    }
+    const result = yield* Effect.either(fs.stat("/original-file.txt"))
 
-    expect(error).toBeDefined()
-    expect(error.reason).toBe("NotFound")
+    expect(Either.isLeft(result)).toBe(true)
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("SystemError")
+      if (result.left._tag === "SystemError") {
+        expect(result.left.reason).toBe("NotFound")
+      }
+    }
 
     const content = yield* fs.readFileString("/renamed-file.txt")
     expect(content).toBe("original content")
   }))
 
 // Skipping symlink test as it's not working correctly in the MemoryFileSystem implementation
-it.skip("symlink creation and resolution", () =>
+it("symlink creation and resolution", () =>
   effect(function*() {
     const fs = yield* FS
 
@@ -224,8 +223,10 @@ it.skip("symlink creation and resolution", () =>
     const content = yield* fs.readFileString("/link.txt")
     expect(content).toBe("target content")
 
+    // Note: Using stat on symlink follows the link and returns info about target
+    // This is expected behavior for most filesystem operations
     const linkInfo = yield* fs.stat("/link.txt")
-    expect(linkInfo.type).toBe("SymbolicLink")
+    expect(linkInfo.type).toBe("File") // The target is a file
   }))
 
 it("copy file", () =>
@@ -251,7 +252,7 @@ it("copy file", () =>
   }))
 
 // Skipping temp files tests as they're not working with the MemoryFileSystem implementation
-describe.skip("temporary files and directories", () => {
+describe("temporary files and directories", () => {
   it("makeTempDirectory creates temp directory", () =>
     effect(function*() {
       const fs = yield* FS
@@ -261,7 +262,7 @@ describe.skip("temporary files and directories", () => {
       const stat = yield* fs.stat(tempDir)
       expect(stat.type).toBe("Directory")
 
-      yield* fs.remove(tempDir)
+      yield* fs.remove(tempDir, { recursive: true })
     }))
 
   it("makeTempFile creates temp file", () =>
@@ -273,7 +274,7 @@ describe.skip("temporary files and directories", () => {
       const stat = yield* fs.stat(tempFile)
       expect(stat.type).toBe("File")
 
-      yield* fs.remove(tempFile)
+      yield* fs.remove(tempFile, { recursive: true })
     }))
 })
 
@@ -324,7 +325,7 @@ it("truncating files", () =>
   }))
 
 // Skipping partial read test as it's not working with memfs implementation
-it.skip("reading partial file content", () =>
+it("reading partial file content", () =>
   effect(function*() {
     const fs = yield* FS
 
@@ -436,25 +437,26 @@ describe("file watching", () => {
 })
 
 describe("error handling", () => {
-  it.skip("making directory that already exists throws AlreadyExists error", () =>
+  it("making directory that already exists throws AlreadyExists error", () =>
     effect(function*() {
       const fs = yield* FS
 
       yield* fs.makeDirectory("/existing-dir-test", { recursive: false })
 
-      let error = null
-      try {
-        yield* fs.makeDirectory("/existing-dir-test", { recursive: false })
-      } catch (e) {
-        error = e
-      }
+      const result = yield* Effect.either(
+        fs.makeDirectory("/existing-dir-test", { recursive: false }),
+      )
 
-      expect(error).toBeDefined()
-      expect(error._tag).toBe("SystemError")
-      expect(error.reason).toBe("AlreadyExists")
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("SystemError")
+        if (result.left._tag === "SystemError") {
+          expect(result.left.reason).toBe("AlreadyExists")
+        }
+      }
     }))
 
-  it.skip("removing non-empty directory without recursive flag throws error", () =>
+  it("removing non-empty directory without recursive flag throws error", () =>
     effect(function*() {
       const fs = yield* FS
 
@@ -468,15 +470,14 @@ describe("error handling", () => {
         },
       )
 
-      let error = null
-      try {
-        yield* fs.remove("/non-empty-dir-test", { recursive: false })
-      } catch (e) {
-        error = e
-      }
+      const result = yield* Effect.either(
+        fs.remove("/non-empty-dir-test", { recursive: false }),
+      )
 
-      expect(error).toBeDefined()
-      expect(error._tag).toBe("SystemError")
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("SystemError")
+      }
 
       yield* fs.remove("/non-empty-dir-test", { recursive: true })
     }))

@@ -136,15 +136,24 @@ export function make(contents?: Contents) {
       handleErrnoException("FileSystem", method),
       handleBadArgument(method),
     )
+    const nodeMkdir = effectify(
+      NFS.mkdir,
+      handleErrnoException("FileSystem", method),
+      handleBadArgument(method),
+    )
     return (options?: FileSystem.MakeTempDirectoryOptions) =>
       Effect.suspend(() => {
         const prefix = options?.prefix ?? ""
-        const directory = typeof options?.directory === "string"
-          ? Path.join(options.directory, ".")
-          : OS.tmpdir()
+        const tmpDirParent = Path.join(options?.directory ?? "/tmp", ".")
 
-        return nodeMkdtemp(
-          prefix ? Path.join(directory, prefix) : directory + "/",
+        // Ensure the temp directory exists in memory filesystem
+        return pipe(
+          nodeMkdir(tmpDirParent, { recursive: true }),
+          Effect.flatMap(() =>
+            nodeMkdtemp(
+              prefix ? Path.join(tmpDirParent, prefix) : tmpDirParent + "/",
+            )
+          ),
         )
       })
   }
@@ -289,10 +298,7 @@ export function make(contents?: Contents) {
         return this.semaphore.withPermits(1)(
           Effect.map(
             Effect.suspend(() =>
-              nodeRead(this.fd, {
-                buffer,
-                position: this.position,
-              })
+              nodeRead(this.fd, buffer, 0, buffer.length, Number(this.position))
             ),
             (bytesRead) => {
               const sizeRead = FileSystem.Size(bytesRead)
@@ -309,10 +315,13 @@ export function make(contents?: Contents) {
           Effect.sync(() => Buffer.allocUnsafeSlow(sizeNumber)),
           (buffer) =>
             Effect.map(
-              nodeReadAlloc(this.fd, {
+              nodeReadAlloc(
+                this.fd,
                 buffer,
-                position: this.position,
-              }),
+                0,
+                sizeNumber,
+                Number(this.position),
+              ),
               (bytesRead): Option.Option<Buffer> => {
                 if (bytesRead === 0) {
                   return Option.none()
