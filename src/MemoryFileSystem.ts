@@ -124,7 +124,7 @@ export function make(contents?: Contents) {
     return (path: string, options?: FileSystem.MakeDirectoryOptions) =>
       nodeMkdir(path, {
         recursive: options?.recursive ?? false,
-        mode: options?.mode,
+        mode: options?.mode ?? 0o755,
       })
   })()
 
@@ -662,8 +662,8 @@ export function make(contents?: Contents) {
       try {
         NFS.writeFile(path, data, {
           signal,
-          flag: options?.flag,
-          mode: options?.mode,
+          flag: options?.flag ?? "w",
+          mode: options?.mode ?? 0o755,
         }, (err) => {
           if (err) {
             resume(
