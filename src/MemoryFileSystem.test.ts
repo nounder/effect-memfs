@@ -277,6 +277,402 @@ describe("temporary files and directories", () => {
       yield* fs.remove(tempFile, { recursive: true })
     }))
 })
+describe("makeTempDirectoryScoped", () => {
+  it("creates temporary directory that gets cleaned up automatically", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempDir: string = ""
+
+      // Create scoped temp directory and verify it exists within scope
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "test-scoped-",
+        })
+
+        // Verify directory exists and is a directory
+        const stat = yield* fs.stat(tempDir)
+        expect(stat.type).toBe("Directory")
+
+        // Verify directory is in temp location
+        expect(tempDir).toMatch(/\/tmp\/.*test-scoped-/)
+      }))
+
+      // Verify directory is cleaned up after scope ends
+      const result = yield* Effect.either(fs.stat(tempDir))
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("SystemError")
+        if (result.left._tag === "SystemError") {
+          expect(result.left.reason).toBe("NotFound")
+        }
+      }
+    }))
+
+  it("creates temp directory with custom options", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempDir: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "custom-prefix-",
+          directory: "/tmp",
+        })
+
+        expect(tempDir).toMatch(/\/tmp\/.*custom-prefix-/)
+
+        const stat = yield* fs.stat(tempDir)
+        expect(stat.type).toBe("Directory")
+      }))
+
+      // Verify cleanup
+      const result = yield* Effect.either(fs.stat(tempDir))
+      expect(Either.isLeft(result)).toBe(true)
+    }))
+
+  it("can write files to scoped temp directory", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempDir: string = ""
+      let testFilePath: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "test-write-" })
+        testFilePath = Path.join(tempDir, "test-file.txt")
+
+        // Write a file to the temp directory
+        yield* fs.writeFileString(testFilePath, "test content", {
+          flag: "w",
+          mode: 0o644,
+        })
+
+        // Verify file exists and has correct content
+        const content = yield* fs.readFileString(testFilePath)
+        expect(content).toBe("test content")
+      }))
+
+      // Verify entire directory and its contents are cleaned up
+      const dirResult = yield* Effect.either(fs.stat(tempDir))
+      const fileResult = yield* Effect.either(fs.stat(testFilePath))
+
+      expect(Either.isLeft(dirResult)).toBe(true)
+      expect(Either.isLeft(fileResult)).toBe(true)
+    }))
+
+  it("cleans up even when error occurs in scope", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempDir: string = ""
+
+      // Expect an error but capture the temp dir path first
+      const result = yield* Effect.either(
+        Effect.scoped(Effect.gen(function*() {
+          tempDir = yield* fs.makeTempDirectoryScoped({
+            prefix: "test-error-",
+          })
+
+          // Verify directory exists
+          const stat = yield* fs.stat(tempDir)
+          expect(stat.type).toBe("Directory")
+
+          // Throw an error to test cleanup happens even with errors
+          yield* Effect.fail(new Error("Intentional test error"))
+        })),
+      )
+
+      expect(Either.isLeft(result)).toBe(true)
+
+      // Verify directory is still cleaned up despite the error
+      const dirResult = yield* Effect.either(fs.stat(tempDir))
+      expect(Either.isLeft(dirResult)).toBe(true)
+      if (Either.isLeft(dirResult)) {
+        expect(dirResult.left._tag).toBe("SystemError")
+        if (dirResult.left._tag === "SystemError") {
+          expect(dirResult.left.reason).toBe("NotFound")
+        }
+      }
+    }))
+
+  it("creates unique directories on multiple calls", () =>
+    effect(function*() {
+      const fs = yield* FS
+      const tempDirs: string[] = []
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        const dir1 = yield* fs.makeTempDirectoryScoped({ prefix: "unique-" })
+        const dir2 = yield* fs.makeTempDirectoryScoped({ prefix: "unique-" })
+        const dir3 = yield* fs.makeTempDirectoryScoped({ prefix: "unique-" })
+
+        tempDirs.push(dir1, dir2, dir3)
+
+        // Verify all directories are unique
+        expect(new Set(tempDirs).size).toBe(3)
+
+        // Verify all directories exist
+        for (const dir of tempDirs) {
+          const stat = yield* fs.stat(dir)
+          expect(stat.type).toBe("Directory")
+        }
+      }))
+
+      // Verify all directories are cleaned up
+      for (const dir of tempDirs) {
+        const result = yield* Effect.either(fs.stat(dir))
+        expect(Either.isLeft(result)).toBe(true)
+      }
+    }))
+})
+
+describe("makeTempFileScoped", () => {
+  it("creates temporary file that gets cleaned up automatically", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempFile: string = ""
+      let tempDir: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempFile = yield* fs.makeTempFileScoped({ prefix: "test-file-" })
+        tempDir = Path.dirname(tempFile)
+
+        // Verify file exists and is a file
+        const stat = yield* fs.stat(tempFile)
+        expect(stat.type).toBe("File")
+
+        // Verify file is in temp location
+        expect(tempFile).toMatch(/\/tmp\/.*test-file-/)
+
+        // Verify we can write to the file
+        yield* fs.writeFileString(tempFile, "temp file content", {
+          flag: "w",
+          mode: 0o644,
+        })
+        const content = yield* fs.readFileString(tempFile)
+        expect(content).toBe("temp file content")
+      }))
+
+      // Verify both file and its parent directory are cleaned up
+      const fileResult = yield* Effect.either(fs.stat(tempFile))
+      const dirResult = yield* Effect.either(fs.stat(tempDir))
+
+      expect(Either.isLeft(fileResult)).toBe(true)
+      expect(Either.isLeft(dirResult)).toBe(true)
+    }))
+
+  it("creates temp file with custom options", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempFile: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempFile = yield* fs.makeTempFileScoped({
+          prefix: "custom-file-",
+          directory: "/tmp",
+        })
+
+        expect(tempFile).toMatch(/\/tmp\/.*custom-file-/)
+
+        const stat = yield* fs.stat(tempFile)
+        expect(stat.type).toBe("File")
+      }))
+
+      // Verify cleanup
+      const result = yield* Effect.either(fs.stat(tempFile))
+      expect(Either.isLeft(result)).toBe(true)
+    }))
+
+  it("cleans up even when error occurs in scope", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempFile: string = ""
+      let tempDir: string = ""
+
+      const result = yield* Effect.either(
+        Effect.scoped(Effect.gen(function*() {
+          tempFile = yield* fs.makeTempFileScoped({
+            prefix: "test-file-error-",
+          })
+          tempDir = Path.dirname(tempFile)
+
+          // Verify file exists
+          const stat = yield* fs.stat(tempFile)
+          expect(stat.type).toBe("File")
+
+          // Write some content
+          yield* fs.writeFileString(tempFile, "error test content", {
+            flag: "w",
+            mode: 0o644,
+          })
+
+          // Throw an error to test cleanup happens even with errors
+          yield* Effect.fail(new Error("Intentional file test error"))
+        })),
+      )
+
+      expect(Either.isLeft(result)).toBe(true)
+
+      // Verify both file and directory are cleaned up despite the error
+      const fileResult = yield* Effect.either(fs.stat(tempFile))
+      const dirResult = yield* Effect.either(fs.stat(tempDir))
+
+      expect(Either.isLeft(fileResult)).toBe(true)
+      expect(Either.isLeft(dirResult)).toBe(true)
+    }))
+
+  it("creates unique files on multiple calls", () =>
+    effect(function*() {
+      const fs = yield* FS
+      const tempFiles: string[] = []
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        const file1 = yield* fs.makeTempFileScoped({ prefix: "unique-file-" })
+        const file2 = yield* fs.makeTempFileScoped({ prefix: "unique-file-" })
+        const file3 = yield* fs.makeTempFileScoped({ prefix: "unique-file-" })
+
+        tempFiles.push(file1, file2, file3)
+
+        // Verify all files are unique
+        expect(new Set(tempFiles).size).toBe(3)
+
+        // Verify all files exist and can be written to
+        for (let i = 0; i < tempFiles.length; i++) {
+          const file = tempFiles[i]!
+          const stat = yield* fs.stat(file)
+          expect(stat.type).toBe("File")
+
+          yield* fs.writeFileString(file, `content ${i}`, {
+            flag: "w",
+            mode: 0o644,
+          })
+          const content = yield* fs.readFileString(file)
+          expect(content).toBe(`content ${i}`)
+        }
+      }))
+
+      // Verify all files and their directories are cleaned up
+      for (const file of tempFiles) {
+        const fileResult = yield* Effect.either(fs.stat(file))
+        const dirResult = yield* Effect.either(fs.stat(Path.dirname(file)))
+
+        expect(Either.isLeft(fileResult)).toBe(true)
+        expect(Either.isLeft(dirResult)).toBe(true)
+      }
+    }))
+
+  it("can open and use file handles within scope", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempFile: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempFile = yield* fs.makeTempFileScoped({ prefix: "test-handle-" })
+
+        // Open file and write using file handle
+        const file = yield* fs.open(tempFile, { flag: "w+" })
+
+        const writeData = new TextEncoder().encode("handle test data")
+        yield* file.write(writeData)
+
+        // Seek to beginning and read back
+        yield* file.seek(0, "start")
+        const buffer = new Uint8Array(writeData.length)
+        const bytesRead = yield* file.read(buffer)
+
+        expect(Number(bytesRead)).toBe(writeData.length)
+        expect(new TextDecoder().decode(buffer)).toBe("handle test data")
+
+        yield* file.sync
+      }))
+
+      // Verify cleanup
+      const result = yield* Effect.either(fs.stat(tempFile))
+      expect(Either.isLeft(result)).toBe(true)
+    }))
+})
+
+describe("scoped temp resource interactions", () => {
+  it("nested scopes work correctly", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let outerDir: string = ""
+      let innerDir: string = ""
+      let tempFile: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        outerDir = yield* fs.makeTempDirectoryScoped({ prefix: "outer-" })
+
+        yield* Effect.scoped(Effect.gen(function*() {
+          innerDir = yield* fs.makeTempDirectoryScoped({ prefix: "inner-" })
+          tempFile = yield* fs.makeTempFileScoped({ prefix: "nested-file-" })
+
+          // Verify all resources exist
+          const outerStat = yield* fs.stat(outerDir)
+          const innerStat = yield* fs.stat(innerDir)
+          const fileStat = yield* fs.stat(tempFile)
+
+          expect(outerStat.type).toBe("Directory")
+          expect(innerStat.type).toBe("Directory")
+          expect(fileStat.type).toBe("File")
+        }))
+
+        // Inner scope resources should be cleaned up
+        const innerResult = yield* Effect.either(fs.stat(innerDir))
+        const fileResult = yield* Effect.either(fs.stat(tempFile))
+
+        expect(Either.isLeft(innerResult)).toBe(true)
+        expect(Either.isLeft(fileResult)).toBe(true)
+
+        // Outer scope resource should still exist
+        const outerStat = yield* fs.stat(outerDir)
+        expect(outerStat.type).toBe("Directory")
+      }))
+
+      // All resources should be cleaned up now
+      const outerResult = yield* Effect.either(fs.stat(outerDir))
+      expect(Either.isLeft(outerResult)).toBe(true)
+    }))
+
+  it("can create files within scoped temp directories", () =>
+    effect(function*() {
+      const fs = yield* FS
+      let tempDir: string = ""
+      let createdFile: string = ""
+
+      yield* Effect.scoped(Effect.gen(function*() {
+        tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "dir-with-files-",
+        })
+
+        // Create multiple files in the temp directory
+        createdFile = Path.join(tempDir, "created-file.txt")
+        const subDir = Path.join(tempDir, "subdir")
+        const subFile = Path.join(subDir, "sub-file.txt")
+
+        yield* fs.writeFileString(createdFile, "created content", {
+          flag: "w",
+          mode: 0o644,
+        })
+        yield* fs.makeDirectory(subDir)
+        yield* fs.writeFileString(subFile, "sub content", {
+          flag: "w",
+          mode: 0o644,
+        })
+
+        // Verify all exist
+        const fileContent = yield* fs.readFileString(createdFile)
+        const subFileContent = yield* fs.readFileString(subFile)
+
+        expect(fileContent).toBe("created content")
+        expect(subFileContent).toBe("sub content")
+      }))
+
+      // Verify entire directory tree is cleaned up
+      const dirResult = yield* Effect.either(fs.stat(tempDir))
+      const fileResult = yield* Effect.either(fs.stat(createdFile))
+
+      expect(Either.isLeft(dirResult)).toBe(true)
+      expect(Either.isLeft(fileResult)).toBe(true)
+    }))
+})
 
 it("appending to files", () =>
   effect(function*() {
@@ -341,20 +737,16 @@ it("reading partial file content", () =>
 
     const file = yield* fs.open("/partial.txt", { flag: "r" })
 
-    try {
-      const buffer = new Uint8Array(5)
-      yield* file.read(buffer)
+    const buffer = new Uint8Array(5)
+    yield* file.read(buffer)
 
-      expect(new TextDecoder().decode(buffer)).toBe("abcde")
+    expect(new TextDecoder().decode(buffer)).toBe("abcde")
 
-      yield* file.seek(10, "start")
-      const buffer2 = new Uint8Array(5)
-      yield* file.read(buffer2)
+    yield* file.seek(10, "start")
+    const buffer2 = new Uint8Array(5)
+    yield* file.read(buffer2)
 
-      expect(new TextDecoder().decode(buffer2)).toBe("klmno")
-    } finally {
-      yield* file.sync
-    }
+    expect(new TextDecoder().decode(buffer2)).toBe("klmno")
   }))
 
 it("stat verifies file metadata", () =>
@@ -381,58 +773,224 @@ it("stat verifies file metadata", () =>
   }))
 
 describe("file watching", () => {
-  it("watch API can be called on a file", () =>
+  it("watches file creation in directory", () =>
+    effect(function*() {
+      const fs = yield* FS
+
+      const watchDir = "/watch-dir"
+      yield* fs.makeDirectory(watchDir, { recursive: true })
+
+      const events: FileSystem.WatchEvent[] = []
+
+      const watchStream = fs.watch(watchDir)
+
+      yield* Effect.gen(function*() {
+        yield* Stream.take(watchStream, 1).pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
+          Effect.fork,
+        )
+
+        yield* Effect.yieldNow()
+
+        // Create a new file
+        yield* fs.writeFileString(
+          `${watchDir}/new-file.txt`,
+          "test content",
+          { flag: "w", mode: 0o644 },
+        )
+
+        yield* Effect.sleep("50 millis")
+      })
+
+      expect(events.length).toBeGreaterThan(0)
+      const createEvent = events.find(e => e._tag === "Create")
+      expect(createEvent).toBeDefined()
+      if (createEvent && createEvent._tag === "Create") {
+        expect(createEvent.path).toMatch(/new-file\.txt$/)
+      }
+    }))
+
+  it("watches file modification", () =>
     effect(function*() {
       const fs = yield* FS
 
       const filePath = "/watched-file.txt"
+
       yield* fs.writeFileString(
         filePath,
         "initial content",
         { flag: "w", mode: 0o644 },
       )
 
-      const watchStream = Stream.take(1)(fs.watch(filePath))
+      const events: FileSystem.WatchEvent[] = []
 
+      const watchStream = fs.watch(filePath)
+
+      yield* Effect.gen(function*() {
+        yield* Stream.take(watchStream, 1).pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
+          Effect.fork,
+        )
+
+        yield* Effect.yieldNow()
+
+        yield* fs.writeFileString(
+          filePath,
+          "modified content",
+          { flag: "w", mode: 0o644 },
+        )
+
+        yield* Effect.yieldNow()
+      })
+
+      expect(events.length).toBeGreaterThan(0)
+      const updateEvent = events.find(e => e._tag === "Update")
+      expect(updateEvent).toBeDefined()
+      if (updateEvent && updateEvent._tag === "Update") {
+        expect(updateEvent.path).toBe(filePath)
+      }
+    }))
+
+  it("watches file deletion", () =>
+    effect(function*() {
+      const fs = yield* FS
+
+      const watchDir = "/watch-delete-dir"
+      const filePath = `${watchDir}/file-to-delete.txt`
+
+      yield* fs.makeDirectory(watchDir, { recursive: true })
       yield* fs.writeFileString(
         filePath,
-        "modified content",
+        "content to delete",
         { flag: "w", mode: 0o644 },
       )
+
+      const events: FileSystem.WatchEvent[] = []
+
+      const watchStream = fs.watch(watchDir)
+
+      yield* Effect.gen(function*() {
+        yield* Stream.take(watchStream, 1).pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
+          Effect.fork,
+        )
+
+        yield* Effect.yieldNow()
+
+        yield* fs.remove(filePath)
+
+        yield* Effect.yieldNow()
+      })
+
+      expect(events.length).toBeGreaterThan(0)
+      const removeEvent = events.find(e => e._tag === "Remove")
+      expect(removeEvent).toBeDefined()
+      if (removeEvent && removeEvent._tag === "Remove") {
+        expect(removeEvent.path).toMatch(/file-to-delete\.txt$/)
+      }
     }))
 
-  it("watch API can be called on a directory", () =>
+  it("watches multiple file operations in sequence", () =>
     effect(function*() {
       const fs = yield* FS
 
-      const dirPath = "/watch-dir"
-      yield* fs.makeDirectory(dirPath, { recursive: true })
+      const watchDir = "/watch-multi-dir"
+      yield* fs.makeDirectory(watchDir, { recursive: true })
 
-      const watchStream = Stream.take(1)(fs.watch(dirPath))
+      const events: FileSystem.WatchEvent[] = []
 
-      yield* fs.writeFileString(
-        `${dirPath}/test-file.txt`,
-        "new file content",
-        { flag: "w", mode: 0o644 },
-      )
+      const watchStream = fs.watch(watchDir)
+
+      yield* Effect.gen(function*() {
+        yield* Stream.take(watchStream, 3).pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
+          Effect.fork,
+        )
+
+        yield* Effect.yieldNow()
+
+        const filePath = `${watchDir}/multi-test.txt`
+        yield* fs.writeFileString(filePath, "initial", {
+          flag: "w",
+          mode: 0o644,
+        })
+        yield* Effect.yieldNow()
+
+        yield* fs.writeFileString(filePath, "modified", {
+          flag: "w",
+          mode: 0o644,
+        })
+        yield* Effect.yieldNow()
+
+        yield* fs.remove(filePath)
+        yield* Effect.yieldNow()
+      })
+
+      expect(events.length).toBeGreaterThan(0)
+
+      const hasCreateEvent = events.some(e => e._tag === "Create")
+      const hasUpdateEvent = events.some(e => e._tag === "Update")
+      const hasRemoveEvent = events.some(e => e._tag === "Remove")
+
+      expect(hasCreateEvent || hasUpdateEvent || hasRemoveEvent).toBe(true)
     }))
 
-  it("recursive watch API works with nested directories", () =>
+  it("watches nested directory operations", () =>
     effect(function*() {
       const fs = yield* FS
 
-      const rootDir = "/watch-root"
-      const subDir = `${rootDir}/subdir`
+      const rootDir = "/watch-nested"
+      yield* fs.makeDirectory(rootDir, { recursive: true })
 
-      yield* fs.makeDirectory(subDir, { recursive: true })
+      const events: FileSystem.WatchEvent[] = []
 
-      const watchStream = Stream.take(1)(fs.watch(rootDir))
+      const watchStream = fs.watch(rootDir)
 
-      yield* fs.writeFileString(
-        `${subDir}/nested-file.txt`,
-        "nested file content",
-        { flag: "w", mode: 0o644 },
-      )
+      yield* Effect.gen(function*() {
+        yield* Stream.take(watchStream, 2).pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
+          Effect.fork,
+        )
+
+        yield* Effect.yieldNow()
+
+        const subDir = `${rootDir}/subdir`
+        yield* fs.makeDirectory(subDir)
+        yield* Effect.yieldNow()
+
+        // Create a file in the subdirectory
+        yield* fs.writeFileString(
+          `${subDir}/nested-file.txt`,
+          "nested content",
+          { flag: "w", mode: 0o644 },
+        )
+        yield* Effect.yieldNow()
+      })
+
+      expect(events.length).toBeGreaterThan(0)
+
+      const hasCreateEvent = events.some(e => e._tag === "Create")
+      expect(hasCreateEvent).toBe(true)
     }))
 })
 
