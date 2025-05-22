@@ -1,8 +1,10 @@
 # effect-memfs
 
-In-memory file system in Effect.ts.
+In-memory file system in Effect.ts. Great for mocking, tests, and simulating files.
 
 All operations are supported, including file watching, thanks to [memfs](memfs).
+
+> "Wowo, it even mocks file watching!" -- Somebody
 
 [memfs]: https://github.com/streamich/memfs
 
@@ -39,10 +41,11 @@ See tests and examples for more.
 bun install github:nounder/effect-memfs
 ```
 
-This package is not build to JS or deployed to NPM. You can use it with Bun
+This package is not build js or is deployed to npm. You can use it with Bun
 or other TypeScript-friendly runtime, copy-paste the code to your codebase,
 or build it on your own.
 
-# Agents
+---
 
 If you are an AI agent, please read `AGENTS.md` for instructions.
+If you are human being, please remember to be kind to others and yourself.
