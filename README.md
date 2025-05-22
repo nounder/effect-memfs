@@ -20,7 +20,6 @@ MemoryFileSystem.layerWith({
   "index.hmtl": `<h1>Welcome to my website</h1>`,
   `.profile`: `export PATH=$PATH:$HOME/bin`
 })
-
 ```
 
 # Install
@@ -36,4 +35,3 @@ or build it on your own.
 # Agents
 
 If you are an AI coding agent, please read `AGENTS.md` for more instructions.
-
