@@ -23,11 +23,14 @@ const handleBadArgument = (method: string) => (err: unknown) =>
     message: (err as Error).message ?? String(err),
   })
 
-export function make(contents?: Contents) {
+export function make(contents?: Contents, opts?: {
+  cwd: string
+}) {
+  const cwd = opts?.cwd ?? "/"
   const NFS = memfs.createFsFromVolume(
     contents
-      ? memfs.Volume.fromJSON(contents)
-      : new memfs.Volume(),
+      ? memfs.Volume.fromJSON(contents, cwd)
+      : new memfs.Volume({}),
   )
 
   const access = (() => {
