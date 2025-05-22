@@ -1,5 +1,6 @@
 {
   "name": "effect-memfs",
+  "version": "0.6.0",
   "module": "src/index.ts",
   "type": "module",
   "devDependencies": {
