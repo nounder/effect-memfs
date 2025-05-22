@@ -602,22 +602,27 @@ export function make(contents?: Contents, opts?: {
 
   // == watch
 
-  const watchNode = (path: string) =>
+  const watchNode = (watchPath: string) =>
     Stream.asyncScoped<FileSystem.WatchEvent, Error.PlatformError>((emit) =>
       Effect.acquireRelease(
         Effect.sync(() => {
-          const watcher = NFS.watch(path, {}, (event, path) => {
-            if (!path) return
+          const watcher = NFS.watch(watchPath, {}, (event, filename) => {
+            if (!filename) return
+            const fullPath = Path.isAbsolute(filename)
+              ? filename
+              : Path.join(watchPath, filename)
             switch (event) {
               case "rename": {
-                emit.fromEffect(Effect.match(stat(path), {
-                  onSuccess: (_) => FileSystem.WatchEventCreate({ path }),
-                  onFailure: (_) => FileSystem.WatchEventRemove({ path }),
+                emit.fromEffect(Effect.match(stat(fullPath), {
+                  onSuccess: (_) =>
+                    FileSystem.WatchEventCreate({ path: fullPath }),
+                  onFailure: (_) =>
+                    FileSystem.WatchEventRemove({ path: fullPath }),
                 }))
                 return
               }
               case "change": {
-                emit.single(FileSystem.WatchEventUpdate({ path }))
+                emit.single(FileSystem.WatchEventUpdate({ path: fullPath }))
                 return
               }
             }
@@ -627,7 +632,7 @@ export function make(contents?: Contents, opts?: {
               module: "FileSystem",
               reason: "Unknown",
               method: "watch",
-              pathOrDescriptor: path,
+              pathOrDescriptor: watchPath,
               message: error.message,
             }))
           })
