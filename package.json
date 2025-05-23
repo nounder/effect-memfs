@@ -1,7 +1,9 @@
 {
   "name": "effect-memfs",
-  "version": "0.6.0",
-  "module": "src/index.ts",
+  "version": "0.7.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "type": "module",
   "devDependencies": {
     "@types/bun": "latest"
