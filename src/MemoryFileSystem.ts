@@ -398,13 +398,14 @@ export function make(contents?: Contents, opts?: {
           ),
           (bytesWritten) => {
             if (bytesWritten === 0) {
-              return Effect.fail(Error.SystemError({
-                module: "FileSystem",
-                method: "writeAll",
-                reason: "WriteZero",
-                pathOrDescriptor: this.fd,
-                message: "write returned 0 bytes written",
-              }))
+              return Effect.fail(
+                new Error.SystemError({
+                  module: "FileSystem",
+                  method: "writeAll",
+                  reason: "WriteZero",
+                  pathOrDescriptor: this.fd,
+                }),
+              )
             }
 
             if (!this.append) {
@@ -628,13 +629,15 @@ export function make(contents?: Contents, opts?: {
             }
           })
           watcher.on("error", (error) => {
-            emit.fail(Error.SystemError({
-              module: "FileSystem",
-              reason: "Unknown",
-              method: "watch",
-              pathOrDescriptor: watchPath,
-              message: error.message,
-            }))
+            emit.fail(
+              new Error.SystemError({
+                module: "FileSystem",
+                reason: "Unknown",
+                method: "watch",
+                pathOrDescriptor: watchPath,
+                message: error.message,
+              }),
+            )
           })
           watcher.on("close", () => {
             emit.end()
