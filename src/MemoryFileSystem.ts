@@ -17,10 +17,10 @@ import { handleErrnoException } from "./error.ts"
 export type Contents = memfs.DirectoryJSON
 
 const handleBadArgument = (method: string) => (err: unknown) =>
-  Error.BadArgument({
+  new Error.BadArgument({
     module: "FileSystem",
     method,
-    message: (err as Error).message ?? String(err),
+    description: (err as Error).message ?? String(err),
   })
 
 export function make(contents?: Contents, opts?: {
@@ -68,6 +68,8 @@ export function make(contents?: Contents, opts?: {
         force: options?.overwrite ?? false,
         preserveTimestamps: options?.preserveTimestamps ?? false,
         recursive: true,
+        mode: 0,
+        verbatimSymlinks: false,
       })
   })()
 
@@ -213,7 +215,7 @@ export function make(contents?: Contents, opts?: {
     return (path: string, options?: FileSystem.OpenFileOptions) =>
       pipe(
         Effect.acquireRelease(
-          nodeOpen(path, options?.flag ?? "r", options?.mode),
+          nodeOpen(path, options?.flag ?? "r", options?.mode ?? 0o666),
           (fd) => Effect.orDie(nodeClose(fd)),
         ),
         Effect.map((fd) =>
@@ -252,14 +254,30 @@ export function make(contents?: Contents, opts?: {
       handleBadArgument("sync"),
     )
 
-    const nodeWriteFactory = (method: string) =>
-      effectify(
-        NFS.write,
-        handleErrnoException("FileSystem", method),
-        handleBadArgument(method),
-      )
-    const nodeWrite = nodeWriteFactory("write")
-    const nodeWriteAll = nodeWriteFactory("writeAll")
+    const nodeWrite = effectify(
+      (
+        fd: number,
+        buffer: Uint8Array,
+        offset: number,
+        length: number,
+        position: number | null,
+        cb: (err: NodeJS.ErrnoException | null, written?: number) => void,
+      ) => NFS.write(fd, buffer, offset, length, position as any, cb),
+      handleErrnoException("FileSystem", "write"),
+      handleBadArgument("write"),
+    )
+    const nodeWriteAll = effectify(
+      (
+        fd: number,
+        buffer: Uint8Array,
+        offset: number,
+        length: number,
+        position: number | null,
+        cb: (err: NodeJS.ErrnoException | null, written?: number) => void,
+      ) => NFS.write(fd, buffer, offset, length, position as any, cb),
+      handleErrnoException("FileSystem", "writeAll"),
+      handleBadArgument("writeAll"),
+    )
 
     class FileImpl implements FileSystem.File {
       readonly [FileSystem.FileTypeId]: FileSystem.FileTypeId
@@ -275,7 +293,10 @@ export function make(contents?: Contents, opts?: {
       }
 
       get stat() {
-        return Effect.map(nodeStat(this.fd), makeFileInfo)
+        return Effect.map(
+          nodeStat(this.fd) as Effect.Effect<NFS.Stats, any, never>,
+          makeFileInfo,
+        )
       }
 
       get sync() {
@@ -346,7 +367,7 @@ export function make(contents?: Contents, opts?: {
       truncate(length?: FileSystem.SizeInput) {
         return this.semaphore.withPermits(1)(
           Effect.map(
-            nodeTruncate(this.fd, length ? Number(length) : undefined),
+            nodeTruncate(this.fd, length ? Number(length) : 0),
             () => {
               if (!this.append) {
                 const len = BigInt(length ?? 0)
@@ -366,9 +387,9 @@ export function make(contents?: Contents, opts?: {
               nodeWrite(
                 this.fd,
                 buffer,
-                undefined,
-                undefined,
-                this.append ? undefined : Number(this.position),
+                0,
+                buffer.length,
+                this.append ? null : Number(this.position),
               )
             ),
             (bytesWritten) => {
@@ -391,9 +412,9 @@ export function make(contents?: Contents, opts?: {
             nodeWriteAll(
               this.fd,
               buffer,
-              undefined,
-              undefined,
-              this.append ? undefined : Number(this.position),
+              0,
+              buffer.length,
+              this.append ? null : Number(this.position),
             )
           ),
           (bytesWritten) => {
@@ -466,7 +487,20 @@ export function make(contents?: Contents, opts?: {
     options?: FileSystem.ReadDirectoryOptions,
   ) =>
     Effect.tryPromise({
-      try: () => NFS.promises.readdir(path, options),
+      try: async () => {
+        const entries = await NFS.promises.readdir(path, options)
+        // Ensure we always return string array
+        if (
+          Array.isArray(entries) && entries.length > 0
+          && typeof entries[0] === "string"
+        ) {
+          return entries as string[]
+        }
+        // Convert Dirent objects to strings
+        return entries.map((entry: any) =>
+          typeof entry === "string" ? entry : entry.name
+        ) as string[]
+      },
       catch: (err) =>
         handleErrnoException("FileSystem", "readDirectory")(err as any, [path]),
     })
@@ -476,7 +510,7 @@ export function make(contents?: Contents, opts?: {
   const readFile = (path: string) =>
     Effect.async<Uint8Array, Error.PlatformError>((resume, signal) => {
       try {
-        NFS.readFile(path, { signal }, (err, data) => {
+        NFS.readFile(path, (err, data) => {
           if (err) {
             resume(
               Effect.fail(
@@ -484,7 +518,7 @@ export function make(contents?: Contents, opts?: {
               ),
             )
           } else {
-            resume(Effect.succeed(data))
+            resume(Effect.succeed(data as Uint8Array))
           }
         })
       } catch (err) {
@@ -500,7 +534,8 @@ export function make(contents?: Contents, opts?: {
       handleErrnoException("FileSystem", "readLink"),
       handleBadArgument("readLink"),
     )
-    return (path: string) => nodeReadLink(path)
+    return (path: string) =>
+      Effect.map(nodeReadLink(path), (result) => String(result))
   })()
 
   // == realPath
@@ -511,7 +546,8 @@ export function make(contents?: Contents, opts?: {
       handleErrnoException("FileSystem", "realPath"),
       handleBadArgument("realPath"),
     )
-    return (path: string) => nodeRealPath(path)
+    return (path: string) =>
+      Effect.map(nodeRealPath(path), (result) => String(result))
   })()
 
   // == rename
@@ -546,16 +582,18 @@ export function make(contents?: Contents, opts?: {
     mtime: Option.fromNullable(stat.mtime),
     atime: Option.fromNullable(stat.atime),
     birthtime: Option.fromNullable(stat.birthtime),
-    dev: stat.dev,
-    rdev: Option.fromNullable(stat.rdev),
-    ino: Option.fromNullable(stat.ino),
+    dev: Number(stat.dev),
+    rdev: Option.fromNullable(stat.rdev ? Number(stat.rdev) : null),
+    ino: Option.fromNullable(stat.ino ? Number(stat.ino) : null),
     mode: stat.mode,
-    nlink: Option.fromNullable(stat.nlink),
-    uid: Option.fromNullable(stat.uid),
-    gid: Option.fromNullable(stat.gid),
+    nlink: Option.fromNullable(stat.nlink ? Number(stat.nlink) : null),
+    uid: Option.fromNullable(stat.uid ? Number(stat.uid) : null),
+    gid: Option.fromNullable(stat.gid ? Number(stat.gid) : null),
     size: FileSystem.Size(stat.size),
-    blksize: Option.fromNullable(FileSystem.Size(stat.blksize)),
-    blocks: Option.fromNullable(stat.blocks),
+    blksize: Option.fromNullable(
+      stat.blksize ? FileSystem.Size(stat.blksize) : null,
+    ),
+    blocks: Option.fromNullable(stat.blocks ? Number(stat.blocks) : null),
   })
   const stat = (() => {
     const nodeStat = effectify(
@@ -563,7 +601,11 @@ export function make(contents?: Contents, opts?: {
       handleErrnoException("FileSystem", "stat"),
       handleBadArgument("stat"),
     )
-    return (path: string) => Effect.map(nodeStat(path), makeFileInfo)
+    return (path: string) =>
+      Effect.map(
+        nodeStat(path) as Effect.Effect<NFS.Stats, any, never>,
+        makeFileInfo,
+      )
   })()
 
   // == symlink
@@ -586,7 +628,7 @@ export function make(contents?: Contents, opts?: {
       handleBadArgument("truncate"),
     )
     return (path: string, length?: FileSystem.SizeInput) =>
-      nodeTruncate(path, length !== undefined ? Number(length) : undefined)
+      nodeTruncate(path, length !== undefined ? Number(length) : 0)
   })()
 
   // == utimes
@@ -635,7 +677,7 @@ export function make(contents?: Contents, opts?: {
                 reason: "Unknown",
                 method: "watch",
                 pathOrDescriptor: watchPath,
-                message: error.message,
+                description: error.message,
               }),
             )
           })
@@ -672,7 +714,6 @@ export function make(contents?: Contents, opts?: {
     Effect.async<void, Error.PlatformError>((resume, signal) => {
       try {
         NFS.writeFile(path, data, {
-          signal,
           flag: options?.flag ?? "w",
           mode: options?.mode ?? 0o755,
         }, (err) => {
